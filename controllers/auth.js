@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/user");
 const filterObj = require("../utils/filterObj");
 const otpGenerator = require("otp-generator");
+const crypto = require("crypto");
+const mailService = require("../services/mailer")
 
 const signToken = (userId) => jwt.sign({ userId }, process.env.JWT_SECRET);
 
@@ -59,6 +61,12 @@ exports.sendOTP = async (req, res, next) => {
     otp_expiry_time,
   });
   //TODO Send mail
+  mailService.sendMail({
+    from: "longdeptryvl@gmail.com",
+    to: "example@gmail.com",
+    subject: "OTP for XMessage",
+    text: `Your OTP is ${new_otp}. This is valid for 10 minutes`
+  })
 
   res.status(200).json({
     status: "success",
@@ -126,6 +134,110 @@ exports.login = async (req, res, next) => {
   });
 };
 
-exports.forgotPassword = async (req, res, next) => {};
+exports.protect = async (req, res, next) => {
+  //Getting JWT token and check if it's there
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startWith("Bearer")
+  ) {
+    token = req.headers.authorization.split(" ")[1];
+  } else if (req.cookies.jwt) {
+    token = req.cookies.jwt;
+  } else {
+    req.status(400).json({
+      status: "error",
+      message: "You are not logged in! Please log in to get access",
+    });
+    return;
+  }
+  //Verification of token
+  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-exports.resetPassword = async (req, res, next) => {};
+  //Chekc if user still exist
+  const this_user = await User.findById(decoded.userId);
+  if (!this_user) {
+    res.status(400).json({
+      status: "error",
+      message: "The user doesn't exsit",
+    });
+  }
+
+  //Check if the user changed their password after token was issued
+  if (this_user.changePasswordAfter(decoded.iat)) {
+    res.status(400).json({
+      status: "error",
+      message: "User recently updated password! Please log in again",
+    });
+  }
+
+  req.user = this_user;
+  next();
+};
+
+exports.forgotPassword = async (req, res, next) => {
+  // Get users email
+  const user = await User.findOne({ email: req.body.email });
+  if (!user) {
+    res.status(400).json({
+      status: "error",
+      message: "There is no user with given email address",
+    });
+    return;
+  }
+  //Generate the random reset token
+  const resetToken = user.createPasswordResetToken();
+  const resetURL = `https://xmessage.com/auth/reset-password/?code=${resetToken}`;
+  try {
+    //Send email with reset url
+    res.status(200).json({
+      status: "success",
+      message: "Reset password link sent to email",
+    });
+  } catch (error) {
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    await user.save({ validateBeforeSave: false });
+    res.status(500).json({
+      status: "error",
+      message: "There was an error sending the email, Please try again later",
+    });
+  }
+};
+
+exports.resetPassword = async (req, res, next) => {
+  // Get user based on token
+  const hashedToken = crypto
+    .createHash("sha256")
+    .update(req.params.token)
+    .digest("hex");
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() },
+  });
+  //If token has expired or submission is out of time window
+  if (!user) {
+    res.status(400).json({
+      status: "error",
+      message: "Token is invalid or expired",
+    });
+    return;
+  }
+  //Update users password & set resetToken 7 expiry to undefined
+  user.password = req.body.password;
+  user.passwordConfirm = req.body.passwordConfirm;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+
+  await user.save();
+
+  //Log in the use and send new JWT
+  //todo send an email to user informing about password reset
+  const token = signToken(user._id);
+  res.status(200).json({
+    status: "success",
+    message: "Password reseted successfully",
+    token,
+  });
+};

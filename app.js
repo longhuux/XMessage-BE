@@ -1,5 +1,7 @@
 const express = require("express");
 
+const routes = require("./routes/index")
+
 const morgan = require("morgan");
 
 const rateLimit = require("express-rate-limit");
@@ -51,5 +53,6 @@ app.use(
 app.use(mongosanitize());
 
 // app.use(xss());
+app.use(routes)
 
 module.exports = app;
