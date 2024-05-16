@@ -1,37 +1,35 @@
-const sgMail = require("@sendgrid/mail");
-const dotenv = require("dotenv")
-dotenv.config({path: "../config.env"})
-sgMail.setApiKey(process.env.SG_KEY);
+const dotenv = require("dotenv");
+const nodemailer = require("nodemailer");
+dotenv.config({ path: "../config.env" });
 
-const sendSGMail = async ({
-  recipient,
-  sender,
-  subject,
-  html,
-  text,
-  content,
-  attachments,
-}) => {
-  try {
-    const from = sender || "huulong140103@gmail.com";
-    const msg = {
-      to: recipient, //email of recipient
-      from: from,
-      subject,
+const sendMailService = async ({ recipient, subject, html, attachments }) => {
+    let transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USERNAME,
+        pass: process.env.EMAIL_PASSWORD,
+      },
+    });
+    let mailOptions = {
+      from: '"XMessage" <huulong140103@gmail.com>',
+      to: recipient,
+      subject: subject,
       html: html,
-      text: text,
       attachments,
     };
-    return sgMail.send(msg);
-  } catch (error) {
-    console.log(error);
-  }
+    transporter.sendMail(mailOptions, function (error, info) {
+      if (error) {
+        console.log(error);
+      } else {
+        console.log("Email sent: " + info.response);
+      }
+    });
 };
 
-exports.sendMail = async () => {
-  if (process.env.NODE_ENV === "development") {
+exports.sendEmail = async (args) => {
+  if (!process.env.NODE_ENV === "development") {
     return new Promise.resolve();
   } else {
-    return sendSGMail;
+    return sendMailService(args);
   }
 };
